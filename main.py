@@ -7,19 +7,35 @@ def handle_consent_popup(page, timeout=10000):
     处理 Cookie 同意弹窗
     """
     try:
-        # 等待同意按钮出现
-        consent_button_selector = 'button.fc-cta-consent.fc-primary-button'
+        # 尝试多种可能的同意按钮选择器
+        consent_selectors = [
+            'button.fc-cta-consent.fc-primary-button',  # 原选择器
+            'button:has-text("Consent")',
+            'button:has-text("Accept")',
+            'button:has-text("Dismiss")',  # 根据你的输出添加
+            'button:has-text("同意")',
+            '[aria-label*="consent" i]',
+            '[aria-label*="accept" i]'
+        ]
+        
         print("检查是否有 Cookie 同意弹窗...")
         
-        # 使用较短的超时时间,因为弹窗可能不会出现
-        page.wait_for_selector(consent_button_selector, state='visible', timeout=timeout)
-        print("发现 Cookie 同意弹窗,正在点击'同意'按钮...")
-        page.click(consent_button_selector)
-        print("已点击'同意'按钮。")
-        time.sleep(2)  # 等待弹窗关闭
-        return True
+        for selector in consent_selectors:
+            try:
+                button = page.query_selector(selector)
+                if button and button.is_visible():
+                    print(f"发现 Cookie 同意弹窗,正在点击按钮: {selector}")
+                    button.click()
+                    print("已点击同意按钮。")
+                    time.sleep(2)  # 等待弹窗关闭
+                    return True
+            except:
+                continue
+        
+        print("未发现 Cookie 同意弹窗或已处理过")
+        return False
     except Exception as e:
-        print(f"未发现 Cookie 同意弹窗或已处理过")
+        print(f"处理 Cookie 弹窗时出错: {e}")
         return False
 
 def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
@@ -206,6 +222,10 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
 
             # --- 确保当前页面是目标服务器页面 ---
             print(f"当前页面URL: {page.url}")
+            
+            # 再次尝试处理可能的 Cookie 弹窗
+            handle_consent_popup(page, timeout=3000)
+            
             time.sleep(2)  # 等待页面完全加载
 
             # --- 查找并点击 "Verlängern" 按钮 ---
