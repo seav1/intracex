@@ -213,57 +213,53 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             print(f"正在查找 'Verlängern' 按钮...")
 
             try:
-                # 等待页面加载完成
-                page.wait_for_load_state("domcontentloaded", timeout=30000)
-                time.sleep(2)
+                # 等待按钮出现(按钮始终可见)
+                page.wait_for_selector(add_button_selector, timeout=30000)
+                print("找到 'Verlängern' 按钮。")
                 
-                # 直接查找按钮,不管它是否可见
+                # 获取按钮元素
                 button = page.query_selector(add_button_selector)
                 
                 if not button:
-                    print("未找到 'Verlängern' 按钮。")
+                    print("按钮查询失败。")
                     page.screenshot(path="extend_button_not_found.png")
-                    
-                    # 尝试打印页面上所有按钮文本,帮助调试
-                    try:
-                        buttons = page.query_selector_all('button')
-                        print(f"页面上找到 {len(buttons)} 个按钮:")
-                        for i, btn in enumerate(buttons[:10]):  # 只打印前10个
-                            try:
-                                text = btn.inner_text().strip()
-                                if text:
-                                    print(f"  按钮 {i+1}: {text}")
-                            except:
-                                pass
-                    except:
-                        pass
-                    
                     return False
                 
-                print("找到 'Verlängern' 按钮。")
-                
-                # 检查按钮是否可点击(是否被禁用或不可见)
+                # 检查按钮是否被禁用
                 is_disabled = button.is_disabled()
-                is_visible = button.is_visible()
+                print(f"按钮状态: disabled={is_disabled}")
                 
-                print(f"按钮状态: 禁用={is_disabled}, 可见={is_visible}")
-                
-                if is_disabled or not is_visible:
-                    print("按钮不可操作(已禁用或隐藏),服务器时间尚未到期,无需续期。")
+                if is_disabled:
+                    print("按钮已禁用,服务器时间尚未到期,无需续期。")
                     print("任务完成 - 无需操作。")
                     return True
                 
-                # 按钮可点击,执行点击操作
+                # 按钮未禁用,可以点击
                 print("按钮可点击,正在点击...")
                 button.click()
                 print("成功点击 'Verlängern' 按钮,已续期。")
                 time.sleep(5)
-                print("任务完成。")
+                print("任务完成 - 已续期。")
                 return True
                 
             except Exception as e:
                 print(f"操作过程中发生错误: {e}")
                 page.screenshot(path="extend_button_error.png")
+                
+                # 尝试打印页面上所有按钮文本,帮助调试
+                try:
+                    buttons = page.query_selector_all('button')
+                    print(f"页面上找到 {len(buttons)} 个按钮:")
+                    for i, btn in enumerate(buttons[:10]):  # 只打印前10个
+                        try:
+                            text = btn.inner_text().strip()
+                            if text:
+                                print(f"  按钮 {i+1}: {text}")
+                        except:
+                            pass
+                except:
+                    pass
+                
                 return False
 
         except Exception as e:
