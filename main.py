@@ -7,19 +7,16 @@ def handle_consent_popup(page, timeout=10000):
     处理 Cookie 同意弹窗
     """
     try:
-        # 等待同意按钮出现
         consent_button_selector = 'button.fc-cta-consent.fc-primary-button'
         print("检查是否有 Cookie 同意弹窗...")
-        
-        # 使用较短的超时时间，因为弹窗可能不会出现
         page.wait_for_selector(consent_button_selector, state='visible', timeout=timeout)
         print("发现 Cookie 同意弹窗，正在点击'同意'按钮...")
         page.click(consent_button_selector)
         print("已点击'同意'按钮。")
-        time.sleep(2)  # 等待弹窗关闭
+        time.sleep(2)
         return True
-    except Exception as e:
-        print(f"未发现 Cookie 同意弹窗或已处理过")
+    except Exception:
+        print("未发现 Cookie 同意弹窗或已处理过")
         return False
 
 def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
@@ -32,7 +29,6 @@ def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
             print(f"正在访问: {url} (尝试 {attempt + 1}/{max_retries})")
             page.goto(url, wait_until=wait_until, timeout=timeout)
             print(f"页面加载成功: {page.url}")
-            
             handle_consent_popup(page, timeout=5000)
             return True
         except PlaywrightTimeoutError:
@@ -56,7 +52,6 @@ def parse_cookies_from_env(cookie_string):
     cookies = []
     if not cookie_string:
         return cookies
-    
     cookie_pairs = cookie_string.split('; ')
     for pair in cookie_pairs:
         if '=' in pair:
@@ -91,7 +86,6 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         )
-        
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -104,11 +98,9 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             if remember_web_cookie:
                 print("尝试使用 REMEMBER_WEB_COOKIE 会话登录...")
                 cookies = parse_cookies_from_env(remember_web_cookie)
-                
                 if cookies:
                     context.add_cookies(cookies)
                     print(f"已设置 {len(cookies)} 个 cookies。正在访问 {server_url}")
-                    
                     if not safe_goto(page, server_url):
                         print("使用 REMEMBER_WEB_COOKIE 访问失败。")
                         remember_web_cookie = None
@@ -173,16 +165,11 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     page.screenshot(path="extend_button_not_found.png")
                     return False
 
-                # 检查 disabled 状态（非 <button> 元素忽略）
-                is_disabled = False
-                try:
-                    is_disabled = button.is_disabled()
-                except:
-                    pass
+                # ⚡ 修正点：检查 class 属性是否包含 disabled
+                button_class = button.get_attribute("class") or ""
+                print(f"按钮 class 属性: {button_class}")
 
-                print(f"按钮状态: disabled={is_disabled}")
-
-                if is_disabled:
+                if "disabled" in button_class:
                     print("按钮已禁用，无需续期。")
                     return True
 
