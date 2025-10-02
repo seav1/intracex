@@ -223,7 +223,22 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             # --- 确保当前页面是目标服务器页面 ---
             print(f"当前页面URL: {page.url}")
             
-            # 再次尝试处理可能的 Cookie 弹窗
+            # 等待页面稳定
+            time.sleep(3)
+            
+            # 强制处理 Cookie 弹窗 - 查找并点击 Dismiss 按钮
+            print("正在处理可能的弹窗...")
+            try:
+                dismiss_button = page.query_selector('button:has-text("Dismiss")')
+                if dismiss_button and dismiss_button.is_visible():
+                    print("发现 Dismiss 按钮,正在点击...")
+                    dismiss_button.click()
+                    time.sleep(2)
+                    print("已关闭弹窗。")
+            except Exception as e:
+                print(f"处理 Dismiss 按钮时出错: {e}")
+            
+            # 尝试处理其他可能的弹窗
             handle_consent_popup(page, timeout=3000)
             
             time.sleep(2)  # 等待页面完全加载
