@@ -7,35 +7,19 @@ def handle_consent_popup(page, timeout=10000):
     处理 Cookie 同意弹窗
     """
     try:
-        # 尝试多种可能的同意按钮选择器
-        consent_selectors = [
-            'button.fc-cta-consent.fc-primary-button',  # 原选择器
-            'button:has-text("Consent")',
-            'button:has-text("Accept")',
-            'button:has-text("Dismiss")',  # 根据你的输出添加
-            'button:has-text("同意")',
-            '[aria-label*="consent" i]',
-            '[aria-label*="accept" i]'
-        ]
-        
+        # 等待同意按钮出现
+        consent_button_selector = 'button.fc-cta-consent.fc-primary-button'
         print("检查是否有 Cookie 同意弹窗...")
         
-        for selector in consent_selectors:
-            try:
-                button = page.query_selector(selector)
-                if button and button.is_visible():
-                    print(f"发现 Cookie 同意弹窗,正在点击按钮: {selector}")
-                    button.click()
-                    print("已点击同意按钮。")
-                    time.sleep(2)  # 等待弹窗关闭
-                    return True
-            except:
-                continue
-        
-        print("未发现 Cookie 同意弹窗或已处理过")
-        return False
+        # 使用较短的超时时间，因为弹窗可能不会出现
+        page.wait_for_selector(consent_button_selector, state='visible', timeout=timeout)
+        print("发现 Cookie 同意弹窗，正在点击'同意'按钮...")
+        page.click(consent_button_selector)
+        print("已点击'同意'按钮。")
+        time.sleep(2)  # 等待弹窗关闭
+        return True
     except Exception as e:
-        print(f"处理 Cookie 弹窗时出错: {e}")
+        print(f"未发现 Cookie 同意弹窗或已处理过")
         return False
 
 def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
@@ -49,9 +33,7 @@ def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
             page.goto(url, wait_until=wait_until, timeout=timeout)
             print(f"页面加载成功: {page.url}")
             
-            # 处理可能出现的 Cookie 同意弹窗
             handle_consent_popup(page, timeout=5000)
-            
             return True
         except PlaywrightTimeoutError:
             print(f"页面加载超时 (尝试 {attempt + 1}/{max_retries})")
@@ -94,125 +76,78 @@ def parse_cookies_from_env(cookie_string):
 def add_server_time(server_url="https://intracex.de/minecraft"):
     """
     尝试登录 intracex.de 并点击 "Verlängern" 按钮。
-    优先使用 REMEMBER_WEB_COOKIE 进行会话登录,如果不存在则回退到邮箱密码登录。
+    优先使用 REMEMBER_WEB_COOKIE，会话失败则回退邮箱密码登录。
     """
-    # 获取环境变量
     remember_web_cookie = os.environ.get('REMEMBER_WEB_COOKIE')
     login_email = os.environ.get('LOGIN_EMAIL')
     login_password = os.environ.get('LOGIN_PASSWORD')
 
-    # 检查是否提供了任何登录凭据
     if not (remember_web_cookie or (login_email and login_password)):
         print("错误: 缺少登录凭据。请设置 REMEMBER_WEB_COOKIE 或 LOGIN_EMAIL 和 LOGIN_PASSWORD 环境变量。")
         return False
 
     with sync_playwright() as p:
-        # 在 GitHub Actions 中,通常使用 headless 模式
-        # 添加更多浏览器参数以提高稳定性
         browser = p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         )
         
-        # 设置更长的默认超时
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
         page = context.new_page()
-        page.set_default_timeout(60000)  # 设置默认超时为 60 秒
+        page.set_default_timeout(60000)
 
         try:
-            # --- 尝试通过 REMEMBER_WEB_COOKIE 会话登录 ---
+            # --- 优先使用 cookie 登录 ---
             if remember_web_cookie:
                 print("尝试使用 REMEMBER_WEB_COOKIE 会话登录...")
-                
-                # 解析 cookies
                 cookies = parse_cookies_from_env(remember_web_cookie)
                 
                 if cookies:
-                    print(f"解析到 {len(cookies)} 个 cookie:")
-                    for cookie in cookies:
-                        print(f"  - {cookie['name']}")
-                    
                     context.add_cookies(cookies)
-                    print(f"已设置所有 cookies。正在访问服务器页面: {server_url}")
+                    print(f"已设置 {len(cookies)} 个 cookies。正在访问 {server_url}")
                     
-                    # 使用 safe_goto 代替直接 goto,使用 domcontentloaded 而非 networkidle
-                    if not safe_goto(page, server_url, wait_until="domcontentloaded"):
-                        print("使用 REMEMBER_WEB_COOKIE 访问服务器页面失败。")
+                    if not safe_goto(page, server_url):
+                        print("使用 REMEMBER_WEB_COOKIE 访问失败。")
                         remember_web_cookie = None
                     else:
-                        # 检查是否成功登录并停留在服务器页面
-                        time.sleep(3)  # 等待页面稳定
+                        time.sleep(3)
                         if "login" in page.url or "auth" in page.url:
-                            print("使用 REMEMBER_WEB_COOKIE 登录失败或会话无效。将尝试使用邮箱密码登录。")
+                            print("REMEMBER_WEB_COOKIE 无效，尝试邮箱密码登录。")
                             context.clear_cookies()
                             remember_web_cookie = None
                         else:
                             print("REMEMBER_WEB_COOKIE 登录成功。")
-                else:
-                    print("无法解析 cookies,将尝试邮箱密码登录。")
-                    remember_web_cookie = None
 
-            # --- 如果 REMEMBER_WEB_COOKIE 不可用或失败,则回退到邮箱密码登录 ---
+            # --- 邮箱密码登录 ---
             if not remember_web_cookie:
                 if not (login_email and login_password):
-                    print("错误: REMEMBER_WEB_COOKIE 无效,且未提供 LOGIN_EMAIL 或 LOGIN_PASSWORD。无法登录。")
+                    print("错误: REMEMBER_WEB_COOKIE 无效，且未提供邮箱密码。")
                     return False
 
                 login_url = "https://intracex.de/auth/login"
-                print(f"正在访问登录页: {login_url}")
-                
-                if not safe_goto(page, login_url, wait_until="domcontentloaded"):
+                if not safe_goto(page, login_url):
                     print("访问登录页失败。")
                     page.screenshot(path="login_page_load_fail.png")
                     return False
 
-                # 登录表单元素选择器
-                email_selector = 'input[name="email"]'
-                password_selector = 'input[name="password"]'
-                login_button_selector = 'button[type="submit"]'
-
-                print("正在等待登录元素加载...")
-                try:
-                    page.wait_for_selector(email_selector, timeout=30000)
-                    page.wait_for_selector(password_selector, timeout=30000)
-                    page.wait_for_selector(login_button_selector, timeout=30000)
-                except Exception as e:
-                    print(f"等待登录元素失败: {e}")
-                    page.screenshot(path="login_elements_not_found.png")
-                    return False
-
-                print("正在填充邮箱和密码...")
-                page.fill(email_selector, login_email)
-                page.fill(password_selector, login_password)
-
-                print("正在点击登录按钮...")
-                page.click(login_button_selector)
+                page.fill('input[name="email"]', login_email)
+                page.fill('input[name="password"]', login_password)
+                page.click('button[type="submit"]')
 
                 try:
-                    # 等待导航完成
                     page.wait_for_load_state("domcontentloaded", timeout=60000)
-                    time.sleep(3)  # 等待页面稳定
-                    
-                    # 检查是否登录成功
+                    time.sleep(3)
                     if "login" in page.url or "auth" in page.url:
-                        error_message_selector = '.alert.alert-danger, .error-message, .form-error'
-                        error_element = page.query_selector(error_message_selector)
-                        if error_element:
-                            error_text = error_element.inner_text().strip()
-                            print(f"邮箱密码登录失败: {error_text}")
-                        else:
-                            print("邮箱密码登录失败: 未能跳转到预期页面。")
+                        print("邮箱密码登录失败。")
                         page.screenshot(path="login_fail.png")
                         return False
                     else:
                         print("邮箱密码登录成功。")
-                        # 导航到服务器页面
                         if page.url != server_url:
-                            print(f"正在导航到服务器页面: {server_url}")
-                            if not safe_goto(page, server_url, wait_until="domcontentloaded"):
+                            if not safe_goto(page, server_url):
                                 print("导航到服务器页面失败。")
                                 return False
                 except Exception as e:
@@ -220,129 +155,46 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     page.screenshot(path="post_login_error.png")
                     return False
 
-            # --- 确保当前页面是目标服务器页面 ---
+            # --- 已经进入服务器页面 ---
             print(f"当前页面URL: {page.url}")
-            
-            # 等待页面稳定
             time.sleep(3)
-            
-            # 截图1: 到达页面后
             page.screenshot(path="step1_page_loaded.png")
-            print("截图已保存: step1_page_loaded.png")
-            
-            # 强制处理 Cookie 弹窗 - 查找并点击 Dismiss 按钮
-            print("正在处理可能的弹窗...")
-            try:
-                dismiss_button = page.query_selector('button:has-text("Dismiss")')
-                if dismiss_button and dismiss_button.is_visible():
-                    print("发现 Dismiss 按钮,正在点击...")
-                    dismiss_button.click()
-                    time.sleep(2)
-                    print("已关闭弹窗。")
-                    # 截图2: 关闭弹窗后
-                    page.screenshot(path="step2_after_dismiss.png")
-                    print("截图已保存: step2_after_dismiss.png")
-                else:
-                    print("未发现 Dismiss 按钮或按钮不可见")
-            except Exception as e:
-                print(f"处理 Dismiss 按钮时出错: {e}")
-            
-            # 尝试处理其他可能的弹窗
-            handle_consent_popup(page, timeout=3000)
-            
-            time.sleep(2)  # 等待页面完全加载
-            
-            # 截图3: 准备查找目标按钮前
-            page.screenshot(path="step3_before_find_button.png")
-            print("截图已保存: step3_before_find_button.png")
-            
-            # 打印页面上所有按钮信息
-            try:
-                all_buttons = page.query_selector_all('button')
-                print(f"\n=== 页面上所有按钮 (共 {len(all_buttons)} 个) ===")
-                for i, btn in enumerate(all_buttons):
-                    try:
-                        text = btn.inner_text().strip()
-                        is_visible = btn.is_visible()
-                        is_disabled = btn.is_disabled()
-                        print(f"按钮 {i+1}: text='{text}', visible={is_visible}, disabled={is_disabled}")
-                    except:
-                        pass
-                print("=" * 50 + "\n")
-            except Exception as e:
-                print(f"获取按钮列表失败: {e}")
 
-            # --- 查找并点击 "Verlängern" 按钮 ---
-            add_button_selector = 'button:has-text("Verlängern")'
-            print(f"正在查找 'Verlängern' 按钮...")
+            # --- 查找并点击 Verlängern 按钮 ---
+            add_button_selector = 'button:has-text("Verlängern"), a:has-text("Verlängern"), [role="button"]:has-text("Verlängern")'
+            print("正在查找 'Verlängern' 按钮...")
 
             try:
-                # 不等待可见,直接查找按钮
+                page.wait_for_selector(add_button_selector, timeout=30000)
                 button = page.query_selector(add_button_selector)
-                
+
                 if not button:
-                    print("未找到 'Verlängern' 按钮。")
-                    page.screenshot(path="step4_button_not_found.png")
-                    print("截图已保存: step4_button_not_found.png")
-                    
-                    # 尝试其他可能的选择器
-                    print("\n尝试其他选择器...")
-                    alternative_selectors = [
-                        'button:has-text("Verlangern")',  # 没有变音符号
-                        'button:has-text("verlängern")',  # 小写
-                        'button[type="submit"]',
-                        'a:has-text("Verlängern")',  # 可能是链接
-                    ]
-                    for alt_selector in alternative_selectors:
-                        alt_button = page.query_selector(alt_selector)
-                        if alt_button:
-                            print(f"找到替代按钮: {alt_selector}")
-                            button = alt_button
-                            break
-                    
-                    if not button:
-                        return False
-                
-                print("找到 'Verlängern' 按钮。")
-                
-                # 检查按钮是否被禁用
-                is_disabled = button.is_disabled()
-                is_visible = button.is_visible()
-                print(f"按钮状态: disabled={is_disabled}, visible={is_visible}")
-                
-                # 截图4: 找到按钮后
-                page.screenshot(path="step4_button_found.png")
-                print("截图已保存: step4_button_found.png")
-                
-                if is_disabled:
-                    print("按钮已禁用,服务器时间尚未到期,无需续期。")
-                    print("任务完成 - 无需操作。")
-                    return True
-                
-                if not is_visible:
-                    print("警告: 按钮存在但不可见,可能被遮挡。")
-                    page.screenshot(path="step5_button_not_visible.png")
-                    print("截图已保存: step5_button_not_visible.png")
+                    print("按钮查询失败。")
+                    page.screenshot(path="extend_button_not_found.png")
                     return False
-                
-                # 按钮未禁用,可以点击
-                print("按钮可点击,正在点击...")
+
+                # 检查 disabled 状态（非 <button> 元素忽略）
+                is_disabled = False
+                try:
+                    is_disabled = button.is_disabled()
+                except:
+                    pass
+
+                print(f"按钮状态: disabled={is_disabled}")
+
+                if is_disabled:
+                    print("按钮已禁用，无需续期。")
+                    return True
+
+                print("按钮可点击，正在点击...")
                 button.click()
-                time.sleep(3)
-                
-                # 截图5: 点击后
-                page.screenshot(path="step5_after_click.png")
-                print("截图已保存: step5_after_click.png")
-                
-                print("成功点击 'Verlängern' 按钮,已续期。")
-                time.sleep(2)
-                print("任务完成 - 已续期。")
+                print("成功点击 'Verlängern' 按钮，已续期。")
+                time.sleep(5)
                 return True
-                
+
             except Exception as e:
                 print(f"操作过程中发生错误: {e}")
-                page.screenshot(path="step_error.png")
-                print("截图已保存: step_error.png")
+                page.screenshot(path="extend_button_error.png")
                 return False
 
         except Exception as e:
