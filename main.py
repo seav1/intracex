@@ -214,14 +214,26 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
 
             try:
                 page.wait_for_selector(add_button_selector, state='visible', timeout=30000)
-                print("找到按钮,正在点击...")
+                print("找到 'Verlängern' 按钮。")
+                
+                # 检查按钮是否可点击(是否被禁用)
+                button = page.query_selector(add_button_selector)
+                is_disabled = button.is_disabled() if button else True
+                
+                if is_disabled:
+                    print("按钮已禁用,服务器时间尚未到期,无需续期。")
+                    print("任务完成 - 无需操作。")
+                    return True
+                
+                # 按钮可点击,执行点击操作
+                print("按钮可点击,正在点击...")
                 page.click(add_button_selector)
-                print("成功点击 'Verlängern' 按钮。")
+                print("成功点击 'Verlängern' 按钮,已续期。")
                 time.sleep(5)
                 print("任务完成。")
                 return True
             except Exception as e:
-                print(f"未找到 'Verlängern' 按钮或点击失败: {e}")
+                print(f"未找到 'Verlängern' 按钮或操作失败: {e}")
                 page.screenshot(path="extend_button_not_found.png")
                 
                 # 尝试打印页面上所有按钮文本,帮助调试
