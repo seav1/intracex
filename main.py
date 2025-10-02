@@ -226,6 +226,10 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             # 等待页面稳定
             time.sleep(3)
             
+            # 截图1: 到达页面后
+            page.screenshot(path="step1_page_loaded.png")
+            print("截图已保存: step1_page_loaded.png")
+            
             # 强制处理 Cookie 弹窗 - 查找并点击 Dismiss 按钮
             print("正在处理可能的弹窗...")
             try:
@@ -235,6 +239,11 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     dismiss_button.click()
                     time.sleep(2)
                     print("已关闭弹窗。")
+                    # 截图2: 关闭弹窗后
+                    page.screenshot(path="step2_after_dismiss.png")
+                    print("截图已保存: step2_after_dismiss.png")
+                else:
+                    print("未发现 Dismiss 按钮或按钮不可见")
             except Exception as e:
                 print(f"处理 Dismiss 按钮时出错: {e}")
             
@@ -242,59 +251,98 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             handle_consent_popup(page, timeout=3000)
             
             time.sleep(2)  # 等待页面完全加载
+            
+            # 截图3: 准备查找目标按钮前
+            page.screenshot(path="step3_before_find_button.png")
+            print("截图已保存: step3_before_find_button.png")
+            
+            # 打印页面上所有按钮信息
+            try:
+                all_buttons = page.query_selector_all('button')
+                print(f"\n=== 页面上所有按钮 (共 {len(all_buttons)} 个) ===")
+                for i, btn in enumerate(all_buttons):
+                    try:
+                        text = btn.inner_text().strip()
+                        is_visible = btn.is_visible()
+                        is_disabled = btn.is_disabled()
+                        print(f"按钮 {i+1}: text='{text}', visible={is_visible}, disabled={is_disabled}")
+                    except:
+                        pass
+                print("=" * 50 + "\n")
+            except Exception as e:
+                print(f"获取按钮列表失败: {e}")
 
             # --- 查找并点击 "Verlängern" 按钮 ---
             add_button_selector = 'button:has-text("Verlängern")'
             print(f"正在查找 'Verlängern' 按钮...")
 
             try:
-                # 等待按钮出现(按钮始终可见)
-                page.wait_for_selector(add_button_selector, timeout=30000)
-                print("找到 'Verlängern' 按钮。")
-                
-                # 获取按钮元素
+                # 不等待可见,直接查找按钮
                 button = page.query_selector(add_button_selector)
                 
                 if not button:
-                    print("按钮查询失败。")
-                    page.screenshot(path="extend_button_not_found.png")
-                    return False
+                    print("未找到 'Verlängern' 按钮。")
+                    page.screenshot(path="step4_button_not_found.png")
+                    print("截图已保存: step4_button_not_found.png")
+                    
+                    # 尝试其他可能的选择器
+                    print("\n尝试其他选择器...")
+                    alternative_selectors = [
+                        'button:has-text("Verlangern")',  # 没有变音符号
+                        'button:has-text("verlängern")',  # 小写
+                        'button[type="submit"]',
+                        'a:has-text("Verlängern")',  # 可能是链接
+                    ]
+                    for alt_selector in alternative_selectors:
+                        alt_button = page.query_selector(alt_selector)
+                        if alt_button:
+                            print(f"找到替代按钮: {alt_selector}")
+                            button = alt_button
+                            break
+                    
+                    if not button:
+                        return False
+                
+                print("找到 'Verlängern' 按钮。")
                 
                 # 检查按钮是否被禁用
                 is_disabled = button.is_disabled()
-                print(f"按钮状态: disabled={is_disabled}")
+                is_visible = button.is_visible()
+                print(f"按钮状态: disabled={is_disabled}, visible={is_visible}")
+                
+                # 截图4: 找到按钮后
+                page.screenshot(path="step4_button_found.png")
+                print("截图已保存: step4_button_found.png")
                 
                 if is_disabled:
                     print("按钮已禁用,服务器时间尚未到期,无需续期。")
                     print("任务完成 - 无需操作。")
                     return True
                 
+                if not is_visible:
+                    print("警告: 按钮存在但不可见,可能被遮挡。")
+                    page.screenshot(path="step5_button_not_visible.png")
+                    print("截图已保存: step5_button_not_visible.png")
+                    return False
+                
                 # 按钮未禁用,可以点击
                 print("按钮可点击,正在点击...")
                 button.click()
+                time.sleep(3)
+                
+                # 截图5: 点击后
+                page.screenshot(path="step5_after_click.png")
+                print("截图已保存: step5_after_click.png")
+                
                 print("成功点击 'Verlängern' 按钮,已续期。")
-                time.sleep(5)
+                time.sleep(2)
                 print("任务完成 - 已续期。")
                 return True
                 
             except Exception as e:
                 print(f"操作过程中发生错误: {e}")
-                page.screenshot(path="extend_button_error.png")
-                
-                # 尝试打印页面上所有按钮文本,帮助调试
-                try:
-                    buttons = page.query_selector_all('button')
-                    print(f"页面上找到 {len(buttons)} 个按钮:")
-                    for i, btn in enumerate(buttons[:10]):  # 只打印前10个
-                        try:
-                            text = btn.inner_text().strip()
-                            if text:
-                                print(f"  按钮 {i+1}: {text}")
-                        except:
-                            pass
-                except:
-                    pass
-                
+                page.screenshot(path="step_error.png")
+                print("截图已保存: step_error.png")
                 return False
 
         except Exception as e:
