@@ -11,9 +11,9 @@ def handle_consent_popup(page, timeout=10000):
         consent_button_selector = 'button.fc-cta-consent.fc-primary-button'
         print("检查是否有 Cookie 同意弹窗...")
         
-        # 使用较短的超时时间，因为弹窗可能不会出现
+        # 使用较短的超时时间,因为弹窗可能不会出现
         page.wait_for_selector(consent_button_selector, state='visible', timeout=timeout)
-        print("发现 Cookie 同意弹窗，正在点击'同意'按钮...")
+        print("发现 Cookie 同意弹窗,正在点击'同意'按钮...")
         page.click(consent_button_selector)
         print("已点击'同意'按钮。")
         time.sleep(2)  # 等待弹窗关闭
@@ -24,7 +24,7 @@ def handle_consent_popup(page, timeout=10000):
 
 def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
     """
-    安全的页面导航，带重试机制
+    安全的页面导航,带重试机制
     """
     max_retries = 2
     for attempt in range(max_retries):
@@ -50,10 +50,35 @@ def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
             return False
     return False
 
+def parse_cookies_from_env(cookie_string):
+    """
+    从环境变量中解析 cookie 字符串
+    格式: "name1=value1; name2=value2"
+    """
+    cookies = []
+    if not cookie_string:
+        return cookies
+    
+    cookie_pairs = cookie_string.split('; ')
+    for pair in cookie_pairs:
+        if '=' in pair:
+            name, value = pair.split('=', 1)
+            cookies.append({
+                'name': name.strip(),
+                'value': value.strip(),
+                'domain': '.intracex.de',
+                'path': '/',
+                'expires': time.time() + 3600 * 24 * 365,
+                'httpOnly': True,
+                'secure': True,
+                'sameSite': 'Lax'
+            })
+    return cookies
+
 def add_server_time(server_url="https://intracex.de/minecraft"):
     """
     尝试登录 intracex.de 并点击 "Verlängern" 按钮。
-    优先使用 REMEMBER_WEB_COOKIE 进行会话登录，如果不存在则回退到邮箱密码登录。
+    优先使用 REMEMBER_WEB_COOKIE 进行会话登录,如果不存在则回退到邮箱密码登录。
     """
     # 获取环境变量
     remember_web_cookie = os.environ.get('REMEMBER_WEB_COOKIE')
@@ -66,7 +91,7 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
         return False
 
     with sync_playwright() as p:
-        # 在 GitHub Actions 中，通常使用 headless 模式
+        # 在 GitHub Actions 中,通常使用 headless 模式
         # 添加更多浏览器参数以提高稳定性
         browser = p.chromium.launch(
             headless=True,
@@ -85,37 +110,39 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             # --- 尝试通过 REMEMBER_WEB_COOKIE 会话登录 ---
             if remember_web_cookie:
                 print("尝试使用 REMEMBER_WEB_COOKIE 会话登录...")
-                session_cookie = Cookie(
-                    name='',
-                    value=remember_web_cookie,
-                    domain='.intracex.de',
-                    path='/',
-                    expires=time.time() + 3600 * 24 * 365,
-                    httpOnly=True,
-                    secure=True,
-                    sameSite='Lax'
-                )
-                context.add_cookies([session_cookie])
-                print(f"已设置 REMEMBER_WEB_COOKIE。正在访问服务器页面: {server_url}")
                 
-                # 使用 safe_goto 代替直接 goto，使用 domcontentloaded 而非 networkidle
-                if not safe_goto(page, server_url, wait_until="domcontentloaded"):
-                    print("使用 REMEMBER_WEB_COOKIE 访问服务器页面失败。")
-                    remember_web_cookie = None
-                else:
-                    # 检查是否成功登录并停留在服务器页面
-                    time.sleep(3)  # 等待页面稳定
-                    if "login" in page.url or "auth" in page.url:
-                        print("使用 REMEMBER_WEB_COOKIE 登录失败或会话无效。将尝试使用邮箱密码登录。")
-                        context.clear_cookies()
+                # 解析 cookies
+                cookies = parse_cookies_from_env(remember_web_cookie)
+                
+                if cookies:
+                    print(f"解析到 {len(cookies)} 个 cookie:")
+                    for cookie in cookies:
+                        print(f"  - {cookie['name']}")
+                    
+                    context.add_cookies(cookies)
+                    print(f"已设置所有 cookies。正在访问服务器页面: {server_url}")
+                    
+                    # 使用 safe_goto 代替直接 goto,使用 domcontentloaded 而非 networkidle
+                    if not safe_goto(page, server_url, wait_until="domcontentloaded"):
+                        print("使用 REMEMBER_WEB_COOKIE 访问服务器页面失败。")
                         remember_web_cookie = None
                     else:
-                        print("REMEMBER_WEB_COOKIE 登录成功。")
+                        # 检查是否成功登录并停留在服务器页面
+                        time.sleep(3)  # 等待页面稳定
+                        if "login" in page.url or "auth" in page.url:
+                            print("使用 REMEMBER_WEB_COOKIE 登录失败或会话无效。将尝试使用邮箱密码登录。")
+                            context.clear_cookies()
+                            remember_web_cookie = None
+                        else:
+                            print("REMEMBER_WEB_COOKIE 登录成功。")
+                else:
+                    print("无法解析 cookies,将尝试邮箱密码登录。")
+                    remember_web_cookie = None
 
-            # --- 如果 REMEMBER_WEB_COOKIE 不可用或失败，则回退到邮箱密码登录 ---
+            # --- 如果 REMEMBER_WEB_COOKIE 不可用或失败,则回退到邮箱密码登录 ---
             if not remember_web_cookie:
                 if not (login_email and login_password):
-                    print("错误: REMEMBER_WEB_COOKIE 无效，且未提供 LOGIN_EMAIL 或 LOGIN_PASSWORD。无法登录。")
+                    print("错误: REMEMBER_WEB_COOKIE 无效,且未提供 LOGIN_EMAIL 或 LOGIN_PASSWORD。无法登录。")
                     return False
 
                 login_url = "https://intracex.de/auth/login"
@@ -187,7 +214,7 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
 
             try:
                 page.wait_for_selector(add_button_selector, state='visible', timeout=30000)
-                print("找到按钮，正在点击...")
+                print("找到按钮,正在点击...")
                 page.click(add_button_selector)
                 print("成功点击 'Verlängern' 按钮。")
                 time.sleep(5)
@@ -197,7 +224,7 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                 print(f"未找到 'Verlängern' 按钮或点击失败: {e}")
                 page.screenshot(path="extend_button_not_found.png")
                 
-                # 尝试打印页面上所有按钮文本，帮助调试
+                # 尝试打印页面上所有按钮文本,帮助调试
                 try:
                     buttons = page.query_selector_all('button')
                     print(f"页面上找到 {len(buttons)} 个按钮:")
