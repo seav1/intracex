@@ -86,9 +86,9 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
             if remember_web_cookie:
                 print("尝试使用 REMEMBER_WEB_COOKIE 会话登录...")
                 session_cookie = Cookie(
-                    name='remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d',
+                    name='',
                     value=remember_web_cookie,
-                    domain='.freegamehost.xyz',
+                    domain='.intracex.de',
                     path='/',
                     expires=time.time() + 3600 * 24 * 365,
                     httpOnly=True,
