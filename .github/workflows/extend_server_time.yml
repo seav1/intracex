@@ -35,9 +35,6 @@ jobs:
           # 检查是否生成了新的 cookie 文件
           if [ -f "new_cookie.txt" ]; then
             echo "cookie_updated=true" >> $GITHUB_OUTPUT
-            echo "NEW_COOKIE<<EOF" >> $GITHUB_OUTPUT
-            cat new_cookie.txt >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "cookie_updated=false" >> $GITHUB_OUTPUT
           fi
@@ -46,10 +43,9 @@ jobs:
         if: steps.run_script.outputs.cookie_updated == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_COOKIE: ${{ steps.run_script.outputs.NEW_COOKIE }}
         run: |
           echo "正在更新 REMEMBER_WEB_COOKIE secret..."
-          gh secret set REMEMBER_WEB_COOKIE --body "$NEW_COOKIE"
+          gh secret set REMEMBER_WEB_COOKIE < new_cookie.txt
           echo "✅ Cookie 已更新"
       
       - name: Upload screenshots
