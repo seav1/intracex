@@ -125,13 +125,19 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     page.screenshot(path="login_page_load_fail.png")
                     return False
 
+                print("正在填写登录信息...")
                 page.fill('input[name="email"]', login_email)
                 page.fill('input[name="password"]', login_password)
-                page.click('button[type="submit"]')
+                
+                # ✅ 修复：使用正确的选择器点击 Anmelden 按钮
+                print("正在点击 'Anmelden' 按钮...")
+                page.click('input[type="submit"][value="Anmelden"]')
 
                 try:
                     page.wait_for_load_state("domcontentloaded", timeout=60000)
                     time.sleep(3)
+                    print(f"登录后跳转到: {page.url}")
+                    
                     if "login" in page.url or "auth" in page.url:
                         print("邮箱密码登录失败。")
                         page.screenshot(path="login_fail.png")
@@ -165,7 +171,7 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     page.screenshot(path="extend_button_not_found.png")
                     return False
 
-                # ⚡ 修正点：检查 class 属性是否包含 disabled
+                # 检查 class 属性是否包含 disabled
                 button_class = button.get_attribute("class") or ""
                 print(f"按钮 class 属性: {button_class}")
 
@@ -177,6 +183,7 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                 button.click()
                 print("成功点击 'Verlängern' 按钮，已续期。")
                 time.sleep(5)
+                page.screenshot(path="extend_success.png")
                 return True
 
             except Exception as e:
