@@ -1,38 +1,57 @@
 name: Extend Server Time
-
 on:
   schedule:
     # 每5天运行一次 (每天的0点，每隔5天)
     - cron: '0 0 */5 * *'
   workflow_dispatch: # 允许手动触发
-
 jobs:
   run-script:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
+      actions: write  # 添加更新 secrets 的权限
     steps:
       - name: Check out repository
         uses: actions/checkout@v3
-
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
+      
       - name: Install Playwright
         run: |
           pip install playwright
           playwright install chromium
-
+      
       - name: Run Python script
+        id: run_script
         env:
           REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
-        run: python main.py
-
+        run: |
+          python main.py
+          # 检查是否生成了新的 cookie 文件
+          if [ -f "new_cookie.txt" ]; then
+            echo "cookie_updated=true" >> $GITHUB_OUTPUT
+            echo "NEW_COOKIE<<EOF" >> $GITHUB_OUTPUT
+            cat new_cookie.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "cookie_updated=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Update REMEMBER_WEB_COOKIE secret
+        if: steps.run_script.outputs.cookie_updated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_COOKIE: ${{ steps.run_script.outputs.NEW_COOKIE }}
+        run: |
+          echo "正在更新 REMEMBER_WEB_COOKIE secret..."
+          gh secret set REMEMBER_WEB_COOKIE --body "$NEW_COOKIE"
+          echo "✅ Cookie 已更新"
+      
       - name: Upload screenshots
         if: always() # 不管成功还是失败都上传截图
         uses: actions/upload-artifact@v4
@@ -40,20 +59,18 @@ jobs:
           name: playwright-screenshots
           path: |
             *.png
-
+      
       - name: Commit time.txt to repo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           if [ ! -f time.txt ]; then
             echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
           else
             echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
           fi
-
           git add time.txt
           if git diff --cached --quiet; then
             echo "无变化，无需提交"
