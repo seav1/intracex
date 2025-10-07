@@ -1,3 +1,4 @@
+
 name: Extend Server Time
 on:
   schedule:
@@ -42,7 +43,7 @@ jobs:
       - name: Update REMEMBER_WEB_COOKIE secret
         if: steps.run_script.outputs.cookie_updated == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           echo "正在更新 REMEMBER_WEB_COOKIE secret..."
           gh secret set REMEMBER_WEB_COOKIE < new_cookie.txt
