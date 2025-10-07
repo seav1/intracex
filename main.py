@@ -68,6 +68,32 @@ def parse_cookies_from_env(cookie_string):
             })
     return cookies
 
+def get_cookies_string(context):
+    """
+    从浏览器 context 中提取 cookies 并转换为字符串格式
+    """
+    cookies = context.cookies()
+    cookie_pairs = []
+    for cookie in cookies:
+        if cookie.get('domain') and 'intracex.de' in cookie['domain']:
+            cookie_pairs.append(f"{cookie['name']}={cookie['value']}")
+    return '; '.join(cookie_pairs)
+
+def save_new_cookie(context):
+    """
+    保存新的 cookie 到文件
+    """
+    try:
+        new_cookie = get_cookies_string(context)
+        if new_cookie:
+            with open('new_cookie.txt', 'w') as f:
+                f.write(new_cookie)
+            print(f"✅ 已保存新 cookie 到 new_cookie.txt (长度: {len(new_cookie)})")
+            return True
+    except Exception as e:
+        print(f"保存 cookie 失败: {e}")
+    return False
+
 def add_server_time(server_url="https://intracex.de/minecraft"):
     """
     尝试登录 intracex.de 并点击 "Verlängern" 按钮。
@@ -129,7 +155,6 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                 page.fill('input[name="email"]', login_email)
                 page.fill('input[name="password"]', login_password)
                 
-                # ✅ 修复：使用正确的选择器点击 Anmelden 按钮
                 print("正在点击 'Anmelden' 按钮...")
                 page.click('input[type="submit"][value="Anmelden"]')
 
@@ -144,6 +169,9 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                         return False
                     else:
                         print("邮箱密码登录成功。")
+                        # 保存新的 cookie
+                        save_new_cookie(context)
+                        
                         if page.url != server_url:
                             if not safe_goto(page, server_url):
                                 print("导航到服务器页面失败。")
