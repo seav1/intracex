@@ -19,6 +19,29 @@ def handle_consent_popup(page, timeout=10000):
         print("未发现 Cookie 同意弹窗或已处理过")
         return False
 
+def is_login_page(page):
+    """
+    检测当前页面是否显示登录表单，用于判断 cookie 是否失效。
+    至少匹配两个核心元素 (邮箱、密码、提交按钮) 则认为是登录页。
+    """
+    login_selectors = [
+        'input#email[type="email"][name="email"]',
+        'input#password[type="password"][name="password"]',
+        'input.btn.btn-primary.btn-block[type="submit"][value="Anmelden"]'
+    ]
+    matches = 0
+    try:
+        for selector in login_selectors:
+            if page.query_selector(selector):
+                matches += 1
+        if matches >= 2:
+            print(f"检测到登录表单 (匹配数量: {matches})")
+            return True
+        return False
+    except Exception as e:
+        print(f"检测登录表单时出错: {e}")
+        return False
+
 def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
     """
     安全的页面导航,带重试机制
@@ -96,15 +119,13 @@ def save_new_cookie(context):
 
 def add_server_time(server_url="https://intracex.de/minecraft"):
     """
-    尝试登录 intracex.de 并点击 "Verlängern" 按钮。
-    优先使用 REMEMBER_WEB_COOKIE，会话失败则回退邮箱密码登录。
+    尝试使用 REMEMBER_WEB_COOKIE 登录 intracex.de 并点击 "Verlängern" 按钮。
+    若检测到登录表单则认定 cookie 失效，不再尝试账号密码登录。
     """
     remember_web_cookie = os.environ.get('REMEMBER_WEB_COOKIE')
-    login_email = os.environ.get('LOGIN_EMAIL')
-    login_password = os.environ.get('LOGIN_PASSWORD')
 
-    if not (remember_web_cookie or (login_email and login_password)):
-        print("错误: 缺少登录凭据。请设置 REMEMBER_WEB_COOKIE 或 LOGIN_EMAIL 和 LOGIN_PASSWORD 环境变量。")
+    if not remember_web_cookie:
+        print("错误: 缺少 REMEMBER_WEB_COOKIE 环境变量，无法登录。")
         return False
 
     with sync_playwright() as p:
@@ -129,56 +150,16 @@ def add_server_time(server_url="https://intracex.de/minecraft"):
                     print(f"已设置 {len(cookies)} 个 cookies。正在访问 {server_url}")
                     if not safe_goto(page, server_url):
                         print("使用 REMEMBER_WEB_COOKIE 访问失败。")
-                        remember_web_cookie = None
-                    else:
-                        time.sleep(3)
-                        if "login" in page.url or "auth" in page.url:
-                            print("REMEMBER_WEB_COOKIE 无效，尝试邮箱密码登录。")
-                            context.clear_cookies()
-                            remember_web_cookie = None
-                        else:
-                            print("REMEMBER_WEB_COOKIE 登录成功。")
-
-            # --- 邮箱密码登录 ---
-            if not remember_web_cookie:
-                if not (login_email and login_password):
-                    print("错误: REMEMBER_WEB_COOKIE 无效，且未提供邮箱密码。")
-                    return False
-
-                login_url = "https://intracex.de/auth/login"
-                if not safe_goto(page, login_url):
-                    print("访问登录页失败。")
-                    page.screenshot(path="login_page_load_fail.png")
-                    return False
-
-                print("正在填写登录信息...")
-                page.fill('input[name="email"]', login_email)
-                page.fill('input[name="password"]', login_password)
-                
-                print("正在点击 'Anmelden' 按钮...")
-                page.click('input[type="submit"][value="Anmelden"]')
-
-                try:
-                    page.wait_for_load_state("domcontentloaded", timeout=60000)
-                    time.sleep(3)
-                    print(f"登录后跳转到: {page.url}")
-                    
-                    if "login" in page.url or "auth" in page.url:
-                        print("邮箱密码登录失败。")
-                        page.screenshot(path="login_fail.png")
+                        page.screenshot(path="cookie_login_fail_navigation.png")
                         return False
-                    else:
-                        print("邮箱密码登录成功。")
-                        # 保存新的 cookie
-                        save_new_cookie(context)
-                        
-                        if page.url != server_url:
-                            if not safe_goto(page, server_url):
-                                print("导航到服务器页面失败。")
-                                return False
-                except Exception as e:
-                    print(f"登录后处理失败: {e}")
-                    page.screenshot(path="post_login_error.png")
+                    time.sleep(3)
+                    if "login" in page.url or "auth" in page.url or is_login_page(page):
+                        print("检测到登录表单，REMEMBER_WEB_COOKIE 失效。")
+                        page.screenshot(path="cookie_invalid_login_page.png")
+                        return False
+                    print("REMEMBER_WEB_COOKIE 登录成功。")
+                else:
+                    print("REMEMBER_WEB_COOKIE 解析失败，未设置有效 cookies。")
                     return False
 
             # --- 已经进入服务器页面 ---
