@@ -34,70 +34,65 @@ jobs:
           python - <<'PY'
           import os
           import time
-          from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+          from contextlib import suppress
+          from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 
           LOGIN_URL = "https://intracex.de/auth/login"
           SERVER_URL = "https://intracex.de/minecraft"
+          CONSENT_SELECTOR = 'button.fc-cta-consent.fc-primary-button'
+          LOGIN_SELECTORS = (
+              'input#email[type="email"][name="email"]',
+              'input#password[type="password"][name="password"]',
+              'input.btn.btn-primary.btn-block[type="submit"][value="Anmelden"]',
+          )
+          BUTTON_SELECTOR = 'button:has-text("Verlängern"), a:has-text("Verlängern"), [role="button"]:has-text("Verlängern")'
 
 
-          def handle_consent_popup(page):
-              try:
-                  selector = 'button.fc-cta-consent.fc-primary-button'
-                  page.wait_for_selector(selector, state='visible', timeout=5000)
-                  page.click(selector)
+          def wait_and_consent(page):
+              with suppress(Exception):
+                  page.wait_for_selector(CONSENT_SELECTOR, state="visible", timeout=5000)
+                  page.click(CONSENT_SELECTOR)
                   time.sleep(1)
-                  print("已同意 Cookie 弹窗。")
-              except Exception:
-                  pass
 
 
-          def is_login_page(page):
-              matches = 0
-              for selector in (
-                  'input#email[type="email"][name="email"]',
-                  'input#password[type="password"][name="password"]',
-                  'input.btn.btn-primary.btn-block[type="submit"][value="Anmelden"]',
-              ):
-                  try:
-                      if page.query_selector(selector):
-                          matches += 1
-                  except Exception:
-                      pass
-              if matches >= 2:
-                  print("检测到登录表单。")
-                  return True
-              return False
-
-
-          def safe_goto(page, url, wait_until="domcontentloaded", timeout=90000):
+          def goto(page, url):
               for attempt in range(2):
                   try:
                       print(f"访问 {url} (第 {attempt + 1} 次)")
-                      page.goto(url, wait_until=wait_until, timeout=timeout)
-                      handle_consent_popup(page)
+                      page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                      wait_and_consent(page)
                       return True
-                  except PlaywrightTimeoutError:
-                      if attempt == 1:
+                  except PWTimeout:
+                      if attempt:
                           print("页面加载超时。")
                           return False
-                      print("页面加载超时，稍后重试...")
+                      print("加载超时，5 秒后重试...")
                       time.sleep(5)
-                  except Exception as e:
-                      print(f"页面导航出错: {e}")
+                  except Exception as exc:
+                      print(f"页面导航出错: {exc}")
                       return False
               return False
 
 
-          def parse_cookies(cookie_string):
-              if not cookie_string:
-                  return []
-              cookies = []
-              for pair in cookie_string.split('; '):
-                  if '=' not in pair:
+          def is_login(page):
+              hits = 0
+              for selector in LOGIN_SELECTORS:
+                  with suppress(Exception):
+                      if page.query_selector(selector):
+                          hits += 1
+              return hits >= 2
+
+
+          def parse_cookie(raw):
+              out = []
+              if not raw:
+                  return out
+              for part in raw.split('; '):
+                  if '=' not in part:
                       continue
-                  name, value = pair.split('=', 1)
-                  cookies.append({
+                  name, value = part.split('=', 1)
+                  out.append({
                       'name': name.strip(),
                       'value': value.strip(),
                       'domain': '.intracex.de',
@@ -107,39 +102,99 @@ jobs:
                       'secure': True,
                       'sameSite': 'Lax',
                   })
-              return cookies
+              return out
 
 
-          def get_cookies_string(context):
-              return '; '.join(
-                  f"{cookie['name']}={cookie['value']}"
-                  for cookie in context.cookies()
-                  if cookie.get('domain') and 'intracex.de' in cookie['domain']
-              )
+          def dump_cookie(context):
+              cookies = [
+                  f"{c['name']}={c['value']}"
+                  for c in context.cookies()
+                  if c.get('domain') and 'intracex.de' in c['domain']
+              ]
+              if cookies:
+                  with open('new_cookie.txt', 'w') as fh:
+                      value = '; '.join(cookies)
+                      fh.write(value)
+                      print(f"已写入新 cookie ({len(value)} 字符)。")
 
 
-          def save_new_cookie(context):
+          def login_with_cookie(context, page, raw_cookie):
+              cookies = parse_cookie(raw_cookie)
+              if not cookies:
+                  print("Cookie 为空或解析失败。")
+                  return False
+              context.add_cookies(cookies)
+              if not goto(page, SERVER_URL):
+                  print("Cookie 导航失败。")
+                  page.screenshot(path="cookie_login_fail_navigation.png")
+                  return False
+              time.sleep(3)
+              if any(tag in page.url for tag in ("login", "auth")) or is_login(page):
+                  print("Cookie 已失效。")
+                  page.screenshot(path="cookie_invalid_login_page.png")
+                  return False
+              print("Cookie 登录成功。")
+              return True
+
+
+          def login_with_password(context, page, email, password):
+              if not goto(page, LOGIN_URL):
+                  print("访问登录页失败。")
+                  page.screenshot(path="login_page_load_fail.png")
+                  return False
+              print("使用邮箱密码登录...")
+              page.fill('input[name="email"]', email)
+              page.fill('input[name="password"]', password)
+              page.click('input[type="submit"][value="Anmelden"]')
               try:
-                  new_cookie = get_cookies_string(context)
-                  if new_cookie:
-                      with open('new_cookie.txt', 'w') as fh:
-                          fh.write(new_cookie)
-                      print(f"已保存新 cookie ({len(new_cookie)} 字符)。")
+                  page.wait_for_load_state("domcontentloaded", timeout=60000)
+                  time.sleep(3)
               except Exception as exc:
-                  print(f"保存 cookie 失败: {exc}")
+                  print(f"等待登录结果失败: {exc}")
+                  page.screenshot(path="post_login_error.png")
+                  return False
+              if any(tag in page.url for tag in ("login", "auth")):
+                  print("邮箱密码登录失败。")
+                  page.screenshot(path="login_fail.png")
+                  return False
+              print("邮箱密码登录成功。")
+              dump_cookie(context)
+              if page.url != SERVER_URL and not goto(page, SERVER_URL):
+                  print("导航到服务器页面失败。")
+                  return False
+              return True
 
 
-          def add_server_time():
-              remember_cookie = os.environ.get('REMEMBER_WEB_COOKIE')
-              login_email = os.environ.get('LOGIN_EMAIL')
-              login_password = os.environ.get('LOGIN_PASSWORD')
+          def extend(page):
+              page.wait_for_selector(BUTTON_SELECTOR, timeout=30000)
+              button = page.query_selector(BUTTON_SELECTOR)
+              if not button:
+                  print("未找到 'Verlängern' 按钮。")
+                  page.screenshot(path="extend_button_not_found.png")
+                  return False
+              button_class = button.get_attribute("class") or ""
+              print(f"按钮 class: {button_class}")
+              if "disabled" in button_class:
+                  print("按钮禁用，无需续期。")
+                  return True
+              button.click()
+              print("已点击 'Verlängern' 按钮。")
+              time.sleep(5)
+              page.screenshot(path="extend_success.png")
+              return True
 
-              if not (remember_cookie or (login_email and login_password)):
+
+          def main():
+              cookie = os.environ.get('REMEMBER_WEB_COOKIE')
+              email = os.environ.get('LOGIN_EMAIL')
+              password = os.environ.get('LOGIN_PASSWORD')
+
+              if not (cookie or (email and password)):
                   print("错误: 未提供 REMEMBER_WEB_COOKIE 或邮箱密码。")
                   return False
 
-              with sync_playwright() as playwright:
-                  browser = playwright.chromium.launch(
+              with sync_playwright() as p:
+                  browser = p.chromium.launch(
                       headless=True,
                       args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
                   )
@@ -152,96 +207,22 @@ jobs:
 
                   try:
                       used_cookie = False
-                      cookie_failed = False
-
-                      if remember_cookie:
-                          print("尝试使用 REMEMBER_WEB_COOKIE...")
-                          cookies = parse_cookies(remember_cookie)
-                          if cookies:
-                              context.add_cookies(cookies)
-                              if safe_goto(page, SERVER_URL):
-                                  time.sleep(3)
-                                  if any(key in page.url for key in ("login", "auth")) or is_login_page(page):
-                                      print("Cookie 已失效。")
-                                      page.screenshot(path="cookie_invalid_login_page.png")
-                                      cookie_failed = True
-                                  else:
-                                      print("Cookie 登录成功。")
-                                      used_cookie = True
-                              else:
-                                  print("Cookie 导航失败。")
-                                  page.screenshot(path="cookie_login_fail_navigation.png")
-                                  cookie_failed = True
-                          else:
-                              print("Cookie 解析失败。")
-                              cookie_failed = True
-
-                          if cookie_failed:
-                              context.clear_cookies()
-
-                      if not used_cookie:
-                          if not (login_email and login_password):
-                              print("错误: Cookie 失效但未提供邮箱密码。")
-                              return False
-
-                          if not safe_goto(page, LOGIN_URL):
-                              print("访问登录页失败。")
-                              page.screenshot(path="login_page_load_fail.png")
-                              return False
-
-                          print("使用邮箱密码登录...")
-                          page.fill('input[name="email"]', login_email)
-                          page.fill('input[name="password"]', login_password)
-                          page.click('input[type="submit"][value="Anmelden"]')
-
-                          try:
-                              page.wait_for_load_state("domcontentloaded", timeout=60000)
-                              time.sleep(3)
-                              if any(key in page.url for key in ("login", "auth")):
-                                  print("邮箱密码登录失败。")
-                                  page.screenshot(path="login_fail.png")
-                                  return False
-                              print("邮箱密码登录成功。")
-                              save_new_cookie(context)
-                              if page.url != SERVER_URL and not safe_goto(page, SERVER_URL):
-                                  print("导航到服务器页面失败。")
-                                  return False
-                          except Exception as exc:
-                              print(f"登录后处理失败: {exc}")
-                              page.screenshot(path="post_login_error.png")
+                      if cookie and login_with_cookie(context, page, cookie):
+                          used_cookie = True
+                      else:
+                          context.clear_cookies()
+                          if not (email and password and login_with_password(context, page, email, password)):
                               return False
 
                       print(f"当前页面 URL: {page.url}")
                       time.sleep(3)
                       page.screenshot(path="step1_page_loaded.png")
-
-                      button_selector = 'button:has-text("Verlängern"), a:has-text("Verlängern"), [role="button"]:has-text("Verlängern")'
-                      print("查找 'Verlängern' 按钮...")
-                      page.wait_for_selector(button_selector, timeout=30000)
-                      button = page.query_selector(button_selector)
-                      if not button:
-                          print("未找到按钮。")
-                          page.screenshot(path="extend_button_not_found.png")
-                          return False
-
-                      button_class = button.get_attribute("class") or ""
-                      print(f"按钮 class: {button_class}")
-                      if "disabled" in button_class:
-                          print("按钮已禁用，无需续期。")
-                          return True
-
-                      button.click()
-                      print("已点击 'Verlängern' 按钮。")
-                      time.sleep(5)
-                      page.screenshot(path="extend_success.png")
-                      return True
+                      return extend(page)
 
                   except Exception as exc:
                       print(f"执行失败: {exc}")
-                      try:
+                      with suppress(Exception):
                           page.screenshot(path="general_error.png")
-                      except Exception:
-                          pass
                       return False
                   finally:
                       browser.close()
@@ -249,7 +230,7 @@ jobs:
 
           if __name__ == "__main__":
               print("开始执行添加服务器时间任务...")
-              if add_server_time():
+              if main():
                   print("任务执行成功。")
                   raise SystemExit(0)
               print("任务执行失败。")
