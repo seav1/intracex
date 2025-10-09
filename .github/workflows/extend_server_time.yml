@@ -26,6 +26,7 @@ jobs:
           playwright install chromium
 
       - name: Extend server time
+        id: extend
         env:
           REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
@@ -47,6 +48,7 @@ jobs:
               'input.btn.btn-primary.btn-block[type="submit"][value="Anmelden"]',
           )
           BUTTON_SELECTOR = 'button:has-text("Verlängern"), a:has-text("Verlängern"), [role="button"]:has-text("Verlängern")'
+          UPDATED_COOKIE = {"value": ""}
 
 
           def wait_and_consent(page):
@@ -105,17 +107,16 @@ jobs:
               return out
 
 
-          def dump_cookie(context):
+          def capture_cookie(context):
               cookies = [
                   f"{c['name']}={c['value']}"
                   for c in context.cookies()
                   if c.get('domain') and 'intracex.de' in c['domain']
               ]
               if cookies:
-                  with open('new_cookie.txt', 'w') as fh:
-                      value = '; '.join(cookies)
-                      fh.write(value)
-                      print(f"已写入新 cookie ({len(value)} 字符)。")
+                  value = '; '.join(cookies)
+                  UPDATED_COOKIE['value'] = value
+                  print(f"提取到 cookie ({len(value)} 字符)。")
 
 
           def login_with_cookie(context, page, raw_cookie):
@@ -134,6 +135,7 @@ jobs:
                   page.screenshot(path="cookie_invalid_login_page.png")
                   return False
               print("Cookie 登录成功。")
+              capture_cookie(context)
               return True
 
 
@@ -158,7 +160,7 @@ jobs:
                   page.screenshot(path="login_fail.png")
                   return False
               print("邮箱密码登录成功。")
-              dump_cookie(context)
+              capture_cookie(context)
               if page.url != SERVER_URL and not goto(page, SERVER_URL):
                   print("导航到服务器页面失败。")
                   return False
@@ -184,8 +186,30 @@ jobs:
               return True
 
 
+          def load_cookie():
+              env_cookie = (os.environ.get('REMEMBER_WEB_COOKIE') or '').strip()
+              if env_cookie:
+                  return env_cookie
+              try:
+                  with open('new_cookie.txt', 'r') as fh:
+                      file_cookie = fh.read().strip()
+                      if file_cookie:
+                          print("从 new_cookie.txt 加载 cookie。")
+                          return file_cookie
+              except FileNotFoundError:
+                  pass
+              return ''
+
+
+          def load_cookie():
+              env_cookie = (os.environ.get('REMEMBER_WEB_COOKIE') or '').strip()
+              if env_cookie:
+                  return env_cookie
+              return ''
+
+
           def main():
-              cookie = os.environ.get('REMEMBER_WEB_COOKIE')
+              cookie = load_cookie()
               email = os.environ.get('LOGIN_EMAIL')
               password = os.environ.get('LOGIN_PASSWORD')
 
@@ -232,35 +256,31 @@ jobs:
               print("开始执行添加服务器时间任务...")
               if main():
                   print("任务执行成功。")
+                  output = os.environ.get('GITHUB_OUTPUT')
+                  if output and UPDATED_COOKIE['value']:
+                      with open(output, 'a', encoding='utf-8') as fh:
+                          fh.write(f"remember_cookie={UPDATED_COOKIE['value']}\n")
                   raise SystemExit(0)
               print("任务执行失败。")
               raise SystemExit(1)
           PY
-
-      - name: Commit updated cookie
-        if: success()
+ 
+      - name: Update REMEMBER_WEB_COOKIE secret
+        if: success() && steps.extend.outputs.remember_cookie != ''
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          if [ -z "${GH_PAT}" ]; then
-            echo "缺少 GH_PAT，跳过 cookie 更新提交。"
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "缺少 GH_PAT，跳过更新 GitHub Secret。"
             exit 0
           fi
 
-          if [ ! -f new_cookie.txt ]; then
-            echo "未生成新的 cookie 文件，跳过提交。"
+          cookie="${{ steps.extend.outputs.remember_cookie }}"
+          if [ -z "${cookie}" ]; then
+            echo "未检测到新的 cookie，跳过更新。"
             exit 0
           fi
 
-          git status --short new_cookie.txt
-          if git diff --quiet -- new_cookie.txt 2>/dev/null; then
-            echo "cookie 内容未变化，跳过提交。"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add new_cookie.txt
-          git commit -m "chore: update remember cookie"
-          git push "https://x-access-token:${GH_PAT}@github.com/${{ github.repository }}" HEAD:${{ github.ref }}
+          gh auth status 2>/dev/null || gh auth login --with-token <<<"${GH_TOKEN}"
+          gh secret set REMEMBER_WEB_COOKIE --repo "${GITHUB_REPOSITORY}" --app actions --body "${cookie}"
 
