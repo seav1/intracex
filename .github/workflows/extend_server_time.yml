@@ -281,6 +281,9 @@ jobs:
             exit 0
           fi
 
-          gh auth status 2>/dev/null || gh auth login --with-token <<<"${GH_TOKEN}"
-          gh secret set REMEMBER_WEB_COOKIE --repo "${GITHUB_REPOSITORY}" --app actions --body "${cookie}"
+          if ! gh auth status >/dev/null 2>&1; then
+            echo "${GH_TOKEN}" | gh auth login --with-token >/dev/null 2>&1
+          fi
+          gh secret set REMEMBER_WEB_COOKIE --repo "${GITHUB_REPOSITORY}" --app actions --body "${cookie}" >/dev/null
+          echo "REMEMBER_WEB_COOKIE 已更新。"
 
